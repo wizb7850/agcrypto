@@ -4,6 +4,7 @@ import { ledgerEntries, merchants, withdrawals } from '../db/schema.js';
 import { fromUnits, toUnits } from '../lib/money.js';
 import { newId } from '../lib/security.js';
 import { HttpError } from './errors.js';
+import { type FeeConfig, withdrawalFee } from './fees.js';
 import { getBalance } from './ledger.js';
 import { enqueueEvent } from './webhooks.js';
 
@@ -15,6 +16,8 @@ export function presentWithdrawal(w: Withdrawal) {
     status: w.status,
     currency: w.currency,
     amount: fromUnits(toUnits(w.amount)),
+    fee: fromUnits(toUnits(w.fee)),
+    net_amount: fromUnits(toUnits(w.netAmount)),
     address: w.address,
     extra_id: w.extraId,
     tx_hash: w.txHash,
@@ -24,14 +27,23 @@ export function presentWithdrawal(w: Withdrawal) {
   };
 }
 
+export function quoteWithdrawal(fees: FeeConfig, currency: string, amount: string) {
+  const c = currency.toLowerCase();
+  const { fee, net } = withdrawalFee(fees, c, toUnits(amount));
+  return { currency: c, amount: fromUnits(toUnits(amount)), fee: fromUnits(fee), net_amount: fromUnits(net) };
+}
+
 export async function requestWithdrawal(
   db: Db,
+  fees: FeeConfig,
   merchantId: string,
   p: { currency: string; amount: string; address: string; extraId?: string },
 ) {
   const currency = p.currency.toLowerCase();
   const amount = toUnits(p.amount);
   if (amount <= 0n) throw new HttpError(400, 'invalid_amount', 'Le montant doit être positif');
+  // Frais figés au moment de la demande : un changement de config n'affecte pas les retraits en attente.
+  const { fee, net } = withdrawalFee(fees, currency, amount);
 
   return db.transaction(async (tx) => {
     // Verrou sur le marchand : deux demandes simultanées ne peuvent pas dépenser le même solde.
@@ -42,7 +54,7 @@ export async function requestWithdrawal(
     }
     const id = newId('wd');
     const [w] = await tx.insert(withdrawals).values({
-      id, merchantId, currency, amount: p.amount, address: p.address, extraId: p.extraId, status: 'requested',
+      id, merchantId, currency, amount: fromUnits(amount), fee: fromUnits(fee), netAmount: fromUnits(net), address: p.address, extraId: p.extraId, status: 'requested',
     }).returning();
     // Le montant est retiré du solde dès la demande (bloqué), recrédité si l'admin refuse.
     await tx.insert(ledgerEntries).values({

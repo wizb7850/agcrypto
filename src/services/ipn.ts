@@ -16,7 +16,6 @@ export const ipnSchema = z.object({
   payment_id: z.union([z.number(), z.string()]).transform(String),
   payment_status: z.string(),
   order_id: z.string(),
-  invoice_id: z.union([z.number(), z.string()]).nullish(),
   pay_currency: z.string().nullish(),
   pay_amount: amountField,
   actually_paid: amountField,
@@ -26,7 +25,11 @@ export const ipnSchema = z.object({
 
 const dec = (v: number | string | null | undefined) => (v == null ? null : fromUnits(toUnits(v)));
 
-export async function handleIpn(db: Db, feePercent: number, raw: Record<string, unknown>) {
+export async function handleIpn(
+  db: Db,
+  opts: { feePercent: number; publicBaseUrl: string },
+  raw: Record<string, unknown>,
+) {
   const ipn = ipnSchema.parse(raw);
   const status = mapPaymentStatus(ipn.payment_status);
 
@@ -34,9 +37,6 @@ export async function handleIpn(db: Db, feePercent: number, raw: Record<string, 
     // Verrou sur la facture : les IPN concurrentes d'une même facture sont traitées une par une.
     const [invoice] = await tx.select().from(invoices).where(eq(invoices.id, ipn.order_id)).for('update');
     if (!invoice) throw new HttpError(404, 'unknown_order', `Facture inconnue : ${ipn.order_id}`);
-    if (ipn.invoice_id != null && String(ipn.invoice_id) !== invoice.providerInvoiceId) {
-      throw new HttpError(400, 'invoice_mismatch', 'invoice_id ne correspond pas à la facture');
-    }
 
     const fields = {
       payCurrency: ipn.pay_currency?.toLowerCase() ?? null,
@@ -49,6 +49,10 @@ export async function handleIpn(db: Db, feePercent: number, raw: Record<string, 
     };
     const [existing] = await tx.select().from(payments)
       .where(eq(payments.providerPaymentId, ipn.payment_id));
+
+    if (existing && existing.invoiceId !== invoice.id) {
+      throw new HttpError(400, 'invoice_mismatch', 'Ce paiement appartient à une autre facture');
+    }
 
     let paymentId: string;
     if (!existing) {
@@ -68,7 +72,7 @@ export async function handleIpn(db: Db, feePercent: number, raw: Record<string, 
       const amount = fields.outcomeAmount ?? fields.actuallyPaid;
       if (!currency || !amount) throw new Error(`IPN "finished" sans montant : ${ipn.payment_id}`);
       const gross = toUnits(amount);
-      const fee = percentOf(gross, feePercent);
+      const fee = percentOf(gross, opts.feePercent);
       const base = { merchantId: invoice.merchantId, currency, reference: paymentId };
       await tx.insert(ledgerEntries).values([
         { ...base, type: 'payment', amount: fromUnits(gross) },
@@ -83,6 +87,6 @@ export async function handleIpn(db: Db, feePercent: number, raw: Record<string, 
 
     const [updated] = await tx.update(invoices).set({ status: next, updatedAt: new Date() })
       .where(eq(invoices.id, invoice.id)).returning();
-    await enqueueEvent(tx, invoice.merchantId, `invoice.${next}`, presentInvoice(updated!));
+    await enqueueEvent(tx, invoice.merchantId, `invoice.${next}`, presentInvoice(updated!, opts.publicBaseUrl));
   });
 }

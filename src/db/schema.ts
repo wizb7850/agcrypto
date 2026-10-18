@@ -31,8 +31,9 @@ export const invoices = pgTable('invoices', {
   priceCurrency: text('price_currency').notNull(),
   description: text('description'),
   status: text('status').notNull(),
-  providerInvoiceId: text('provider_invoice_id').notNull(),
-  checkoutUrl: text('checkout_url').notNull(),
+  successUrl: text('success_url'),
+  cancelUrl: text('cancel_url'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   createdAt: createdAt(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [uniqueIndex('invoices_merchant_order_uq').on(t.merchantId, t.orderId)]);
@@ -44,6 +45,9 @@ export const payments = pgTable('payments', {
   status: text('status').notNull(),
   payCurrency: text('pay_currency'),
   payAmount: amount('pay_amount'),
+  payAddress: text('pay_address'),
+  payExtraId: text('pay_extra_id'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
   actuallyPaid: amount('actually_paid'),
   outcomeAmount: amount('outcome_amount'),
   outcomeCurrency: text('outcome_currency'),
@@ -72,7 +76,9 @@ export const withdrawals = pgTable('withdrawals', {
   id: text('id').primaryKey(),
   merchantId: text('merchant_id').notNull().references(() => merchants.id),
   currency: text('currency').notNull(),
-  amount: amount('amount').notNull(),
+  amount: amount('amount').notNull(),       // débité du solde
+  fee: amount('fee').notNull(),             // ta commission
+  netAmount: amount('net_amount').notNull(), // ce que tu envoies réellement
   address: text('address').notNull(),
   extraId: text('extra_id'),
   status: text('status').notNull(), // requested | completed | rejected

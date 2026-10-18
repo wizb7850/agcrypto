@@ -51,3 +51,17 @@ describe('statuts', () => {
     expect(invoiceStatusFrom(['expired', 'paid'])).toBe('paid');
   });
 });
+
+import { withdrawalFee } from '../src/services/fees.js';
+
+describe('frais de retrait', () => {
+  const cfg = { WITHDRAWAL_FEE_PERCENT: 10, WITHDRAWAL_FIXED_FEES: { usdttrc20: '1' } };
+  it('pourcentage + fixe', () => {
+    const { fee, net } = withdrawalFee(cfg, 'usdttrc20', toUnits('100'));
+    expect([fromUnits(fee), fromUnits(net)]).toEqual(['11', '89']);
+    expect(fromUnits(withdrawalFee(cfg, 'btc', toUnits('0.01')).fee)).toBe('0.001');
+  });
+  it('refuse un retrait que les frais dépassent', () => {
+    expect(() => withdrawalFee(cfg, 'usdttrc20', toUnits('1'))).toThrow();
+  });
+});

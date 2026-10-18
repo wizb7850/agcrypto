@@ -6,19 +6,28 @@ const BASE_URLS = {
   sandbox: 'https://api-sandbox.nowpayments.io/v1',
 } as const;
 
-export interface CreateInvoiceInput {
+export interface CreatePaymentInput {
   priceAmount: string;
   priceCurrency: string;
+  payCurrency: string;
   orderId: string;
   description?: string;
   ipnCallbackUrl: string;
-  successUrl?: string;
-  cancelUrl?: string;
-  payCurrency?: string;
+}
+
+export interface ProviderPayment {
+  id: string;
+  status: string;
+  payAddress: string;
+  payAmount: string;
+  payCurrency: string;
+  payExtraId: string | null;
+  expiresAt: Date | null;
 }
 
 export interface NowPaymentsApi {
-  createInvoice(input: CreateInvoiceInput): Promise<{ id: string; invoiceUrl: string }>;
+  /** Crée un paiement et renvoie l'adresse + le montant crypto à afficher sur NOTRE page. */
+  createPayment(input: CreatePaymentInput): Promise<ProviderPayment>;
 }
 
 export function createNowPaymentsClient(opts: {
@@ -30,29 +39,42 @@ export function createNowPaymentsClient(opts: {
   const base = BASE_URLS[opts.env];
 
   return {
-    async createInvoice(input) {
-      const res = await doFetch(`${base}/invoice`, {
+    async createPayment(input) {
+      const res = await doFetch(`${base}/payment`, {
         method: 'POST',
         headers: { 'x-api-key': opts.apiKey, 'content-type': 'application/json' },
         body: JSON.stringify({
           price_amount: Number(input.priceAmount),
           price_currency: input.priceCurrency.toLowerCase(),
+          pay_currency: input.payCurrency,
           order_id: input.orderId,
           order_description: input.description,
           ipn_callback_url: input.ipnCallbackUrl,
-          success_url: input.successUrl,
-          cancel_url: input.cancelUrl,
-          pay_currency: input.payCurrency,
         }),
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(20_000),
       });
-      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-      if (!res.ok || !body.id || !body.invoice_url) {
-        throw new Error(`NOWPayments createInvoice a échoué (${res.status}) : ${JSON.stringify(body)}`);
+      const b = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok || !b.payment_id || !b.pay_address || b.pay_amount == null) {
+        // Message NOWPayments utile (ex. montant inférieur au minimum de la crypto choisie)
+        throw new NowPaymentsError(res.status, typeof b.message === 'string' ? b.message : JSON.stringify(b));
       }
-      return { id: String(body.id), invoiceUrl: String(body.invoice_url) };
+      return {
+        id: String(b.payment_id),
+        status: String(b.payment_status ?? 'waiting'),
+        payAddress: String(b.pay_address),
+        payAmount: String(b.pay_amount),
+        payCurrency: String(b.pay_currency ?? input.payCurrency),
+        payExtraId: b.payin_extra_id ? String(b.payin_extra_id) : null,
+        expiresAt: typeof b.expiration_estimate_date === 'string' ? new Date(b.expiration_estimate_date) : null,
+      };
     },
   };
+}
+
+export class NowPaymentsError extends Error {
+  constructor(public status: number, message: string) {
+    super(`NOWPayments (${status}) : ${message}`);
+  }
 }
 
 /**

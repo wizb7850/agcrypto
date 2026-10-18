@@ -9,14 +9,17 @@ import { type NowPaymentsApi, verifyIpnSignature } from './providers/nowpayments
 import { HttpError } from './services/errors.js';
 import { createInvoice, getInvoice, presentInvoice } from './services/invoices.js';
 import { handleIpn } from './services/ipn.js';
-import { getBalances } from './services/ledger.js';
+import { getBalances, getRevenue } from './services/ledger.js';
 import {
-  completeWithdrawal, listWithdrawals, rejectWithdrawal, requestWithdrawal,
+  completeWithdrawal, listWithdrawals, quoteWithdrawal, rejectWithdrawal, requestWithdrawal,
 } from './services/withdrawals.js';
+import { registerCheckoutRoutes } from './routes/checkout.js';
 
 export interface AppDeps {
   db: Db;
-  config: Pick<Config, 'PUBLIC_BASE_URL' | 'NOWPAYMENTS_IPN_SECRET' | 'PLATFORM_FEE_PERCENT' | 'ADMIN_TOKEN' | 'LOG_LEVEL'>;
+  config: Pick<Config,
+    | 'PUBLIC_BASE_URL' | 'NOWPAYMENTS_IPN_SECRET' | 'ADMIN_TOKEN' | 'LOG_LEVEL' | 'PAYMENT_FEE_PERCENT'
+    | 'WITHDRAWAL_FEE_PERCENT' | 'WITHDRAWAL_FIXED_FEES' | 'CHECKOUT_CURRENCIES' | 'INVOICE_TTL_MINUTES'>;
   nowpayments: NowPaymentsApi;
 }
 
@@ -30,7 +33,6 @@ const createInvoiceBody = z.object({
   description: z.string().max(500).optional(),
   success_url: z.url().optional(),
   cancel_url: z.url().optional(),
-  pay_currency: currency.optional(),
 });
 
 const withdrawalBody = z.object({
@@ -54,6 +56,9 @@ export function buildApp({ db, config, nowpayments }: AppDeps) {
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof HttpError) {
       return reply.status(err.statusCode).send({ error: err.code, message: err.message });
+    }
+    if (err instanceof z.ZodError) {
+      return reply.status(400).send({ error: 'invalid_request', message: z.prettifyError(err) });
     }
     const { statusCode, message } = err as { statusCode?: number; message?: string };
     if (statusCode && statusCode < 500) return reply.status(statusCode).send({ error: 'bad_request', message });
@@ -81,19 +86,15 @@ export function buildApp({ db, config, nowpayments }: AppDeps) {
   app.post('/v1/invoices', async (req, reply) => {
     const merchantId = await merchantAuth(req);
     const b = parse(createInvoiceBody, req.body);
-    const { invoice, created } = await createInvoice(
-      { db, nowpayments, publicBaseUrl: config.PUBLIC_BASE_URL },
-      merchantId,
-      {
-        amount: b.amount, currency: b.currency, orderId: b.order_id, description: b.description,
-        successUrl: b.success_url, cancelUrl: b.cancel_url, payCurrency: b.pay_currency,
-      },
-    );
-    return reply.status(created ? 201 : 200).send(presentInvoice(invoice));
+    const { invoice, created } = await createInvoice(db, config.INVOICE_TTL_MINUTES, merchantId, {
+      amount: b.amount, currency: b.currency, orderId: b.order_id, description: b.description,
+      successUrl: b.success_url, cancelUrl: b.cancel_url,
+    });
+    return reply.status(created ? 201 : 200).send(presentInvoice(invoice, config.PUBLIC_BASE_URL, false));
   });
 
   app.get<{ Params: { id: string } }>('/v1/invoices/:id', async (req) => {
-    return getInvoice(db, await merchantAuth(req), req.params.id);
+    return getInvoice(db, config.PUBLIC_BASE_URL, await merchantAuth(req), req.params.id);
   });
 
   app.get('/v1/balance', async (req) => ({ balances: await getBalances(db, await merchantAuth(req)) }));
@@ -101,10 +102,17 @@ export function buildApp({ db, config, nowpayments }: AppDeps) {
   app.post('/v1/withdrawals', async (req, reply) => {
     const merchantId = await merchantAuth(req);
     const b = parse(withdrawalBody, req.body);
-    const w = await requestWithdrawal(db, merchantId, {
+    const w = await requestWithdrawal(db, config, merchantId, {
       currency: b.currency, amount: b.amount, address: b.address, extraId: b.extra_id,
     });
     return reply.status(201).send(w);
+  });
+
+  // Aperçu des frais avant de demander un retrait
+  app.get('/v1/withdrawals/quote', async (req) => {
+    await merchantAuth(req);
+    const q = parse(z.object({ currency, amount: decimal }), req.query);
+    return quoteWithdrawal(config, q.currency, q.amount);
   });
 
   app.get('/v1/withdrawals', async (req) => ({
@@ -118,11 +126,22 @@ export function buildApp({ db, config, nowpayments }: AppDeps) {
       req.log.warn('IPN rejetée : signature invalide');
       throw new HttpError(401, 'invalid_signature', 'Signature invalide');
     }
-    await handleIpn(db, config.PLATFORM_FEE_PERCENT, req.body as Record<string, unknown>);
+    await handleIpn(db, { feePercent: config.PAYMENT_FEE_PERCENT, publicBaseUrl: config.PUBLIC_BASE_URL },
+      req.body as Record<string, unknown>);
     return reply.send({ ok: true });
   });
 
+  // ---- Page de paiement publique ----
+  registerCheckoutRoutes(app, {
+    db, nowpayments, publicBaseUrl: config.PUBLIC_BASE_URL, currencies: config.CHECKOUT_CURRENCIES,
+  });
+
   // ---- Back-office (toi) ----
+  app.get('/admin/revenue', async (req) => {
+    adminAuth(req);
+    return { revenue: await getRevenue(db) };
+  });
+
   app.get<{ Querystring: { status?: string } }>('/admin/withdrawals', async (req) => {
     adminAuth(req);
     return { withdrawals: await listWithdrawals(db, { status: req.query.status ?? 'requested' }) };

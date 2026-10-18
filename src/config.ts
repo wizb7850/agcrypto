@@ -8,7 +8,22 @@ const schema = z.object({
   NOWPAYMENTS_API_KEY: z.string().min(1),
   NOWPAYMENTS_IPN_SECRET: z.string().min(1),
   NOWPAYMENTS_ENV: z.enum(['sandbox', 'production']).default('sandbox'),
-  PLATFORM_FEE_PERCENT: z.coerce.number().min(0).max(100).default(1),
+  // Frais prélevés sur chaque paiement reçu (en plus des frais NOWPayments, déjà déduits par eux)
+  PAYMENT_FEE_PERCENT: z.coerce.number().min(0).max(50).default(1),
+  // Frais prélevés sur chaque retrait : pourcentage + frais fixe par devise (couvre les frais réseau)
+  WITHDRAWAL_FEE_PERCENT: z.coerce.number().min(0).max(50).default(10),
+  WITHDRAWAL_FIXED_FEES: z.string().default('{}').transform((v, ctx) => {
+    try {
+      return z.record(z.string(), z.string().regex(/^\d+(\.\d+)?$/)).parse(JSON.parse(v));
+    } catch {
+      ctx.addIssue({ code: 'custom', message: 'JSON attendu, ex. {"usdttrc20":"1","btc":"0.0001"}' });
+      return z.NEVER;
+    }
+  }),
+  // Cryptos proposées sur la page de paiement (codes NOWPayments)
+  CHECKOUT_CURRENCIES: z.string().default('usdttrc20,usdterc20,usdtbsc,btc,eth,ltc,trx,bnbbsc')
+    .transform((v) => v.split(',').map((c) => c.trim().toLowerCase()).filter(Boolean)),
+  INVOICE_TTL_MINUTES: z.coerce.number().int().min(5).max(7 * 24 * 60).default(60),
   ADMIN_TOKEN: z.string().min(32, 'ADMIN_TOKEN doit faire au moins 32 caractères'),
   LOG_LEVEL: z.string().default('info'),
 });
