@@ -1,4 +1,4 @@
-import type { PaymentStatus } from '../providers/nowpayments.js';
+import type { PaymentStatus } from '../../providers/nowpayments.js';
 
 // Les IPN peuvent arriver en double ou dans le désordre : un paiement ne
 // fait qu'avancer, jamais reculer (ex. "confirming" reçu après "paid" est ignoré).

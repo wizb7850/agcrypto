@@ -2,7 +2,7 @@ import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { fromUnits, percentOf, toUnits } from '../src/lib/money.js';
 import { mapPaymentStatus, verifyIpnSignature } from '../src/providers/nowpayments.js';
-import { invoiceStatusFrom, isForward } from '../src/services/status.js';
+import { invoiceStatusFrom, isForward } from '../src/modules/payments/status.js';
 
 describe('money', () => {
   it('calcule sans erreur d\'arrondi', () => {
@@ -52,7 +52,7 @@ describe('statuts', () => {
   });
 });
 
-import { withdrawalFee } from '../src/services/fees.js';
+import { withdrawalFee } from '../src/modules/withdrawals/fees.js';
 
 describe('frais de retrait', () => {
   const cfg = { WITHDRAWAL_FEE_PERCENT: 10, WITHDRAWAL_FIXED_FEES: { usdttrc20: '1' } };

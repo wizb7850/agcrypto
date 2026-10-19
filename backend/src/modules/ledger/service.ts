@@ -1,9 +1,9 @@
 import { and, eq, sql } from 'drizzle-orm';
-import type { Db } from '../db/client.js';
-import { ledgerEntries, withdrawals } from '../db/schema.js';
-import { fromUnits, toUnits } from '../lib/money.js';
+import type { Tx } from '../../context.js';
+import type { Db } from '../../db/client.js';
+import { ledgerEntries, withdrawals } from '../../db/schema.js';
+import { fromUnits, toUnits } from '../../lib/money.js';
 
-type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
 export async function getBalance(db: Db | Tx, merchantId: string, currency: string): Promise<bigint> {
   const [row] = await db

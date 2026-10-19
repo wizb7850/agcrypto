@@ -28,6 +28,8 @@ export interface ProviderPayment {
 export interface NowPaymentsApi {
   /** Crée un paiement et renvoie l'adresse + le montant crypto à afficher sur NOTRE page. */
   createPayment(input: CreatePaymentInput): Promise<ProviderPayment>;
+  /** Estimation de conversion (ex. 1000 USD → combien de BTC). Sert à évaluer les retraits en USD. */
+  estimate(amount: string, from: string, to: string): Promise<string>;
 }
 
 export function createNowPaymentsClient(opts: {
@@ -67,6 +69,19 @@ export function createNowPaymentsClient(opts: {
         payExtraId: b.payin_extra_id ? String(b.payin_extra_id) : null,
         expiresAt: typeof b.expiration_estimate_date === 'string' ? new Date(b.expiration_estimate_date) : null,
       };
+    },
+
+    async estimate(amount, from, to) {
+      const qs = new URLSearchParams({ amount, currency_from: from, currency_to: to });
+      const res = await doFetch(`${base}/estimate?${qs}`, {
+        headers: { 'x-api-key': opts.apiKey },
+        signal: AbortSignal.timeout(10_000),
+      });
+      const b = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok || b.estimated_amount == null) {
+        throw new NowPaymentsError(res.status, typeof b.message === 'string' ? b.message : 'estimation impossible');
+      }
+      return String(b.estimated_amount);
     },
   };
 }

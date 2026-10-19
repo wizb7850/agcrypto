@@ -1,5 +1,5 @@
-import { percentOf, toUnits } from '../lib/money.js';
-import { HttpError } from './errors.js';
+import { percentOf, toUnits } from '../../lib/money.js';
+import { HttpError } from '../../lib/errors.js';
 
 export interface FeeConfig {
   WITHDRAWAL_FEE_PERCENT: number;

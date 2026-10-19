@@ -1,10 +1,13 @@
-import { and, asc, desc, eq } from 'drizzle-orm';
-import type { Db } from '../db/client.js';
-import { invoices, merchants, payments } from '../db/schema.js';
-import { fromUnits, toUnits } from '../lib/money.js';
-import { newId } from '../lib/security.js';
-import { type NowPaymentsApi, NowPaymentsError } from '../providers/nowpayments.js';
-import { HttpError } from './errors.js';
+import { and, asc, desc, eq, sql, type SQL } from 'drizzle-orm';
+import type { Config } from '../../config.js';
+import type { Db } from '../../db/client.js';
+import { invoices, merchants, payments } from '../../db/schema.js';
+import { HttpError } from '../../lib/errors.js';
+import { fromUnits, toUnits } from '../../lib/money.js';
+import { newId } from '../../lib/security.js';
+import type { MerchantRow } from '../../plugins/guards.js';
+import { type NowPaymentsApi, NowPaymentsError } from '../../providers/nowpayments.js';
+import { assertCanReceive, invoiceUsd, type LimitsConfig } from '../limits/service.js';
 
 type Invoice = typeof invoices.$inferSelect;
 type Payment = typeof payments.$inferSelect;
@@ -26,6 +29,7 @@ export function presentInvoice(inv: Invoice, baseUrl: string, hasPayments = true
     status: effectiveStatus(inv, hasPayments),
     amount: fromUnits(toUnits(inv.priceAmount)),
     currency: inv.priceCurrency.toUpperCase(),
+    amount_usd: inv.amountUsd && fromUnits(toUnits(inv.amountUsd)),
     description: inv.description,
     checkout_url: checkoutUrl(baseUrl, inv.id),
     expires_at: inv.expiresAt.toISOString(),
@@ -56,35 +60,75 @@ export interface CreateInvoiceParams {
   cancelUrl?: string;
 }
 
-export async function createInvoice(db: Db, ttlMinutes: number, merchantId: string, p: CreateInvoiceParams) {
-  const [row] = await db.insert(invoices).values({
-    id: newId('inv'),
-    merchantId,
-    orderId: p.orderId,
-    priceAmount: p.amount,
-    priceCurrency: p.currency.toLowerCase(),
-    description: p.description,
-    successUrl: p.successUrl,
-    cancelUrl: p.cancelUrl,
-    status: 'pending',
-    expiresAt: new Date(Date.now() + ttlMinutes * 60_000),
-  }).onConflictDoNothing().returning();
-  if (row) return { invoice: row, created: true };
+export async function createInvoice(
+  db: Db,
+  cfg: LimitsConfig & Pick<Config, 'INVOICE_TTL_MINUTES'>,
+  merchant: MerchantRow,
+  p: CreateInvoiceParams,
+) {
+  const currency = p.currency.toLowerCase();
+  const amountUsd = invoiceUsd(cfg, p.amount, currency); // refuse les devises sans taux connu
 
-  // Idempotence : un même order_id renvoie la facture existante (le marchand peut réessayer sans risque).
-  const [existing] = await db.select().from(invoices)
-    .where(and(eq(invoices.merchantId, merchantId), eq(invoices.orderId, p.orderId)));
-  if (!existing) throw new Error('Facture introuvable après conflit');
+  return db.transaction(async (tx) => {
+    // Idempotence : un même order_id renvoie la facture existante (le marchand peut réessayer sans risque).
+    const [existing] = await tx.select().from(invoices)
+      .where(and(eq(invoices.merchantId, merchant.id), eq(invoices.orderId, p.orderId)));
+    if (existing) return checkReplay(existing, p);
+
+    // Verrou sur le marchand : deux factures simultanées ne peuvent pas dépasser la limite ensemble.
+    const [locked] = await tx.select().from(merchants).where(eq(merchants.id, merchant.id)).for('update');
+    await assertCanReceive(tx, cfg, locked!, amountUsd);
+
+    const [row] = await tx.insert(invoices).values({
+      id: newId('inv'),
+      merchantId: merchant.id,
+      orderId: p.orderId,
+      priceAmount: p.amount,
+      priceCurrency: currency,
+      amountUsd,
+      description: p.description,
+      successUrl: p.successUrl,
+      cancelUrl: p.cancelUrl,
+      status: 'pending',
+      expiresAt: new Date(Date.now() + cfg.INVOICE_TTL_MINUTES * 60_000),
+    }).returning();
+    return { invoice: row!, created: true };
+  });
+}
+
+function checkReplay(existing: Invoice, p: CreateInvoiceParams) {
   const same = toUnits(existing.priceAmount) === toUnits(p.amount) && existing.priceCurrency === p.currency.toLowerCase();
   if (!same) throw new HttpError(409, 'order_id_conflict', `order_id déjà utilisé avec d'autres paramètres (${existing.id})`);
   return { invoice: existing, created: false };
 }
 
-export async function listInvoices(db: Db, baseUrl: string, merchantId: string) {
-  const rows = await db.select().from(invoices).where(eq(invoices.merchantId, merchantId))
-    .orderBy(desc(invoices.createdAt)).limit(100);
-  // Liste : une facture en attente est considérée comme ayant un paiement en cours (pas de requête par ligne).
-  return rows.map((inv) => presentInvoice(inv, baseUrl, true));
+// Statut "effectif" en SQL (une facture en attente, expirée et sans paiement est considérée expirée)
+const hasPayments = sql`exists (select 1 from ${payments} where ${payments.invoiceId} = ${invoices.id})`;
+const STATUS_FILTER: Record<string, SQL> = {
+  pending: sql`${invoices.status} = 'pending' and (${invoices.expiresAt} >= now() or ${hasPayments})`,
+  expired: sql`${invoices.status} = 'expired' or (${invoices.status} = 'pending' and ${invoices.expiresAt} < now() and not ${hasPayments})`,
+};
+
+export const INVOICE_STATUSES = ['pending', 'confirming', 'partially_paid', 'paid', 'failed', 'expired', 'refunded'] as const;
+
+export async function listInvoices(
+  db: Db,
+  baseUrl: string,
+  filter: { merchantId?: string; status?: string; limit: number; offset: number },
+) {
+  const where = and(
+    filter.merchantId ? eq(invoices.merchantId, filter.merchantId) : undefined,
+    filter.status ? (STATUS_FILTER[filter.status] ?? eq(invoices.status, filter.status)) : undefined,
+  );
+  const [rows, [count]] = await Promise.all([
+    db.select({ inv: invoices, hasPayments: sql<boolean>`${hasPayments}` }).from(invoices).where(where)
+      .orderBy(desc(invoices.createdAt)).limit(filter.limit).offset(filter.offset),
+    db.select({ total: sql<number>`count(*)::int` }).from(invoices).where(where),
+  ]);
+  return {
+    invoices: rows.map((r) => presentInvoice(r.inv, baseUrl, r.hasPayments)),
+    total: count?.total ?? 0,
+  };
 }
 
 export async function getInvoice(db: Db, baseUrl: string, merchantId: string, id: string) {
@@ -96,13 +140,16 @@ export async function getInvoice(db: Db, baseUrl: string, merchantId: string, id
 
 /** Données publiques affichées sur la page de paiement (aucun secret). */
 export async function getCheckout(db: Db, id: string) {
-  const [row] = await db.select({ inv: invoices, merchantName: merchants.name }).from(invoices)
+  const [row] = await db.select({ inv: invoices, merchantName: merchants.name, merchantStatus: merchants.status }).from(invoices)
     .innerJoin(merchants, eq(merchants.id, invoices.merchantId)).where(eq(invoices.id, id));
   if (!row) throw new HttpError(404, 'not_found', 'Paiement introuvable');
   const pays = await listPayments(db, id);
   // Le paiement affiché : celui qui a le plus avancé, sinon le plus récent.
   const current = pays.find((p) => p.status !== 'pending' && p.status !== 'expired') ?? pays.at(-1) ?? null;
-  return { invoice: row.inv, merchantName: row.merchantName, payment: current, hasPayments: pays.length > 0 };
+  return {
+    invoice: row.inv, merchantName: row.merchantName, merchantActive: row.merchantStatus === 'active',
+    payment: current, hasPayments: pays.length > 0,
+  };
 }
 
 /** Le client a choisi sa crypto : on demande à NOWPayments une adresse et un montant. */
@@ -113,7 +160,8 @@ export async function startPayment(
 ) {
   const { db } = deps;
   if (!deps.currencies.includes(payCurrency)) throw new HttpError(400, 'unsupported_currency', 'Crypto non proposée');
-  const { invoice, payment: current, hasPayments } = await getCheckout(db, invoiceId);
+  const { invoice, payment: current, hasPayments, merchantActive } = await getCheckout(db, invoiceId);
+  if (!merchantActive) throw new HttpError(409, 'not_payable', 'Ce marchand ne peut pas recevoir de paiement pour le moment');
   const status = effectiveStatus(invoice, hasPayments);
   if (status !== 'pending') throw new HttpError(409, 'not_payable', `Ce paiement est ${status}`);
   if (invoice.expiresAt < new Date()) throw new HttpError(409, 'not_payable', 'Ce paiement a expiré');

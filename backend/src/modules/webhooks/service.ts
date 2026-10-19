@@ -1,10 +1,10 @@
 import { and, eq, inArray, lte } from 'drizzle-orm';
 import type { FastifyBaseLogger } from 'fastify';
-import type { Db } from '../db/client.js';
-import { merchants, webhookDeliveries } from '../db/schema.js';
-import { newId, signWebhook } from '../lib/security.js';
+import type { Tx } from '../../context.js';
+import type { Db } from '../../db/client.js';
+import { merchants, webhookDeliveries } from '../../db/schema.js';
+import { newId, signWebhook } from '../../lib/security.js';
 
-type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
 // Délais entre les tentatives, ensuite la notification passe en "failed".
 const RETRY_DELAYS_S = [30, 120, 600, 3600, 6 * 3600, 24 * 3600];

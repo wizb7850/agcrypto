@@ -34,3 +34,11 @@ function numberToString(n: number): string {
   if (!/e/i.test(s)) return s;
   return n.toFixed(SCALE).replace(/\.?0+$/, '');
 }
+
+/** Multiplie deux décimaux exprimés en chaînes (ex. montant × taux de change), résultat exact à 18 décimales. */
+export function mulDecimal(a: string | number, b: string | number): string {
+  return fromUnits((toUnits(a) * toUnits(b)) / FACTOR);
+}
+
+export const sumDecimals = (values: (string | null | undefined)[]) =>
+  fromUnits(values.reduce((acc, v) => acc + (v ? toUnits(v) : 0n), 0n));
