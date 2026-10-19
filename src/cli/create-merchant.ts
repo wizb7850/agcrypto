@@ -1,9 +1,11 @@
 // Usage : npm run merchant:create -- "Nom de la boutique" [https://boutique.com/webhooks/agcrypto]
 import { randomBytes } from 'node:crypto';
+import { loadDotEnv } from '../config.js';
 import { createDb } from '../db/client.js';
 import { apiKeys, merchants } from '../db/schema.js';
 import { generateApiKey, newId } from '../lib/security.js';
 
+loadDotEnv();
 const [name, webhookUrl] = process.argv.slice(2);
 if (!name) {
   console.error('Usage : npm run merchant:create -- "Nom" [webhook_url]');

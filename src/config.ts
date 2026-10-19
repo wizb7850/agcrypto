@@ -1,4 +1,10 @@
+import { existsSync } from 'node:fs';
 import { z } from 'zod';
+
+/** Charge le fichier .env s'il existe (les variables déjà définies dans le système restent prioritaires). */
+export function loadDotEnv(path = '.env') {
+  if (existsSync(path)) process.loadEnvFile(path);
+}
 
 const schema = z.object({
   DATABASE_URL: z.string().min(1),
@@ -33,7 +39,9 @@ export type Config = z.infer<typeof schema>;
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const parsed = schema.safeParse(env);
   if (!parsed.success) {
-    throw new Error(`Configuration invalide :\n${z.prettifyError(parsed.error)}`);
+    const hint = existsSync('.env') ? 'Complète ces variables dans le fichier .env.'
+      : 'Fichier .env introuvable : crée-le avec « cp .env.example .env » puis remplis-le.';
+    throw new Error(`Configuration invalide :\n${z.prettifyError(parsed.error)}\n\n${hint}`);
   }
   return parsed.data;
 }

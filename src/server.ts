@@ -1,9 +1,10 @@
 import { buildApp } from './app.js';
-import { loadConfig } from './config.js';
+import { loadConfig, loadDotEnv } from './config.js';
 import { createDb } from './db/client.js';
 import { createNowPaymentsClient } from './providers/nowpayments.js';
 import { deliverDueWebhooks } from './services/webhooks.js';
 
+loadDotEnv();
 const config = loadConfig();
 const { db, close } = createDb(config.DATABASE_URL);
 const nowpayments = createNowPaymentsClient({ apiKey: config.NOWPAYMENTS_API_KEY, env: config.NOWPAYMENTS_ENV });
