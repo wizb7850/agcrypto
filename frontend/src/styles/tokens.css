@@ -1,0 +1,74 @@
+/*
+ * Design tokens : toutes les couleurs, rayons et ombres de l'interface sont définis ici.
+ * Pour appliquer une nouvelle charte graphique, il suffit de modifier ces valeurs.
+ */
+:root {
+  --font: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --bg: #f5f6fa;
+  --surface: #ffffff;
+  --surface-2: #f8f9fc;
+  --border: #e6e8ef;
+  --border-strong: #d4d7e2;
+  --text: #0f172a;
+  --text-2: #475569;
+  --muted: #64748b;
+
+  --brand: #4f46e5;
+  --brand-hover: #4338ca;
+  --brand-soft: #eef2ff;
+  --brand-text: #ffffff;
+
+  --success: #047857;
+  --success-soft: #ecfdf5;
+  --warning: #b45309;
+  --warning-soft: #fffbeb;
+  --danger: #b91c1c;
+  --danger-soft: #fef2f2;
+  --info: #1d4ed8;
+  --info-soft: #eff6ff;
+
+  --sidebar-bg: #0f172a;
+  --sidebar-text: #cbd5e1;
+  --sidebar-muted: #64748b;
+  --sidebar-active: #1e293b;
+
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.06);
+  --shadow-lg: 0 10px 30px rgb(15 23 42 / 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b1020;
+    --surface: #121a2b;
+    --surface-2: #0f1626;
+    --border: #1f2a40;
+    --border-strong: #2b3954;
+    --text: #e7ecf5;
+    --text-2: #b4bfd3;
+    --muted: #8391aa;
+
+    --brand: #818cf8;
+    --brand-hover: #a5b4fc;
+    --brand-soft: #1c2248;
+    --brand-text: #0b1020;
+
+    --success: #34d399;
+    --success-soft: #0c2a22;
+    --warning: #fbbf24;
+    --warning-soft: #2a210c;
+    --danger: #f87171;
+    --danger-soft: #2c1215;
+    --info: #60a5fa;
+    --info-soft: #0f1e36;
+
+    --sidebar-bg: #070b16;
+    --sidebar-active: #141c30;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+    --shadow-lg: 0 10px 30px rgb(0 0 0 / 0.5);
+  }
+}

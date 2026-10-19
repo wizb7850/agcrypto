@@ -205,11 +205,15 @@ export async function startPayment(
   }).onConflictDoNothing().returning();
   if (row) return row;
   // L'IPN "waiting" est arrivée avant notre insert : la ligne existe déjà, on la complète.
+  // Uniquement si elle appartient bien à CETTE facture (jamais réutiliser le paiement d'une autre facture).
   const [updated] = await db.update(payments).set({
     payAddress: remote.payAddress, payExtraId: remote.payExtraId, expiresAt: remote.expiresAt,
     payAmount: fromUnits(toUnits(remote.payAmount)),
-  }).where(eq(payments.providerPaymentId, remote.id)).returning();
-  return updated!;
+  }).where(and(eq(payments.providerPaymentId, remote.id), eq(payments.invoiceId, invoiceId))).returning();
+  if (!updated) {
+    throw new HttpError(502, 'provider_conflict', 'Le fournisseur a renvoyé un identifiant de paiement déjà utilisé. Réessaie.');
+  }
+  return updated;
 }
 
 const listPayments = (db: Db, invoiceId: string) =>

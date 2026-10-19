@@ -91,6 +91,23 @@ describe('paiements et retraits', () => {
     expect(await deliverDueWebhooks(t.db, t.app.log, fakeFetch)).toBe(0);
   });
 
+  it('un identifiant de paiement déjà utilisé par une autre facture est refusé', async () => {
+    const { session } = await signup(t);
+    const api = await createApiKey(t, session);
+    const create = async (order: string) => (await t.inject({ method: 'POST', url: '/v1/invoices', headers: api,
+      payload: { amount: '10', currency: 'USD', order_id: order } })).json();
+    const a = await create('a');
+    const b = await create('b');
+    await t.inject({ method: 'POST', url: `/pay/${a.id}/payment`, payload: { pay_currency: 'usdttrc20' } });
+    // Le fournisseur renvoie (à tort) le même identifiant pour la facture b
+    const original = t.ctx.nowpayments.createPayment;
+    t.ctx.nowpayments.createPayment = async (input) => ({ ...(await original(input)), id: '777' });
+    const res = await t.inject({ method: 'POST', url: `/pay/${b.id}/payment`, payload: { pay_currency: 'usdttrc20' } });
+    expect(res.statusCode).toBe(502);
+    expect((await t.inject({ method: 'GET', url: `/v1/invoices/${a.id}`, headers: api })).json().payments).toHaveLength(1);
+    expect((await t.inject({ method: 'GET', url: `/v1/invoices/${b.id}`, headers: api })).json().payments).toHaveLength(0);
+  });
+
   it('rejette les IPN falsifiées', async () => {
     const { session } = await signup(t);
     const api = await createApiKey(t, session);
@@ -99,6 +116,16 @@ describe('paiements et retraits', () => {
       payload: { payment_id: 1, order_id: inv.id, payment_status: 'finished', outcome_amount: 1e6, outcome_currency: 'usdttrc20' } });
     expect(forged.statusCode).toBe(401);
     expect((await t.inject({ method: 'GET', url: '/v1/balance', headers: api })).json().balances).toEqual([]);
+  });
+
+  it('informations publiques : tarifs et limites', async () => {
+    const info = (await t.inject({ method: 'GET', url: '/public/info' })).json();
+    expect(info).toMatchObject({
+      demo: false,
+      limits: { unverified_receive_usd: 1000, personal_receive_usd_30d: 10000, personal_withdraw_usd_24h: 2000 },
+      fees: { payment_percent: 1, withdrawal_percent: 10 },
+    });
+    expect(info.price_currencies).toContain('EUR');
   });
 
   it('la documentation de l\'API est générée', async () => {

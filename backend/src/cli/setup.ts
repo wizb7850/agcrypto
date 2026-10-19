@@ -6,7 +6,7 @@ const template = readFileSync('.env.example', 'utf8');
 const current = existsSync('.env') ? readFileSync('.env', 'utf8') : '';
 const values = new Map<string, string>();
 for (const line of current.split('\n')) {
-  const m = line.match(/^([A-Z_]+)=(.*)$/);
+  const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
   if (m) values.set(m[1]!, m[2]!.trim());
 }
 
@@ -14,7 +14,7 @@ const OLD_DB_DEFAULTS = [5432, 5433].map((p) => `postgres://agcrypto:agcrypto@lo
 const changes: string[] = [];
 
 const out = template.split('\n').map((line) => {
-  const m = line.match(/^([A-Z_]+)=(.*)$/);
+  const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
   if (!m) return line;
   const [, key, def] = m as unknown as [string, string, string];
   let value = values.get(key) ?? '';

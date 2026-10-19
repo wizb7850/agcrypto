@@ -137,7 +137,7 @@ async function processWithdrawal(
     await enqueueEvent(tx, w.merchantId, `withdrawal.${result.status}`, presentWithdrawal(result));
     await audit(tx, {
       adminId: p.admin.id, action, targetType: 'withdrawal', targetId: w.id, ip: p.ip,
-      details: { merchant_id: w.merchantId, net_amount: result.netAmount, currency: w.currency, tx_hash: result.txHash, reason: result.rejectReason },
+      details: { merchant_id: w.merchantId, net_amount: fromUnits(toUnits(result.netAmount)), currency: w.currency, tx_hash: result.txHash, reason: result.rejectReason },
     });
     return result;
   });

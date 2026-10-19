@@ -1,3 +1,4 @@
+# Services de développement local. Les ports sont liés à 127.0.0.1 : accessibles uniquement depuis ce PC.
 services:
   postgres:
     image: postgres:16
@@ -6,11 +7,17 @@ services:
       POSTGRES_PASSWORD: agcrypto
       POSTGRES_DB: agcrypto
     # Port peu courant pour ne pas entrer en conflit avec un PostgreSQL déjà installé
-    ports: ["${POSTGRES_PORT:-55432}:5432"]
+    ports: ["127.0.0.1:${POSTGRES_PORT:-55432}:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U agcrypto"]
       interval: 2s
       retries: 30
+
+  # Boîte de réception de test : tous les e-mails envoyés en local s'affichent sur http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:v1.31
+    ports: ["127.0.0.1:1025:1025", "127.0.0.1:8025:8025"]
+
 volumes:
   pgdata:

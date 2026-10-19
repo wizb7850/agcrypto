@@ -10,12 +10,12 @@ export const DEMO_PRICES_USD: Record<string, string> = {
 };
 
 export function createDemoProvider(): NowPaymentsApi {
-  let next = 1_000_000;
   return {
     async createPayment(input) {
       const address = (PREFIX[input.payCurrency] ?? 'TDemo') + randomBytes(14).toString('hex');
       return {
-        id: String(next++),
+        // Identifiant unique même après redémarrage (sinon collision avec les paiements déjà en base)
+        id: `demo_${randomBytes(8).toString('hex')}`,
         status: 'waiting',
         payAddress: address,
         payAmount: input.priceAmount, // démo : 1 unité de prix = 1 unité de crypto

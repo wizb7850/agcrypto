@@ -7,7 +7,7 @@
     "setup": "npm --prefix backend run setup",
     "db": "docker compose up -d --wait && npm --prefix backend run db:migrate",
     "dev": "concurrently -n api,web -c blue,magenta \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
-    "merchant:create": "npm --prefix backend run merchant:create --",
+    "admin:create": "npm --prefix backend run admin:create --",
     "test": "npm --prefix backend test",
     "typecheck": "npm --prefix backend run typecheck && npm --prefix frontend run typecheck",
     "build": "npm --prefix backend run build && npm --prefix frontend run build"

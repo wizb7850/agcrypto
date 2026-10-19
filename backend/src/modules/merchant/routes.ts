@@ -18,6 +18,30 @@ export function registerMerchantRoutes(app: FastifyInstance, ctx: AppContext, gu
   const { db, config } = ctx;
   const auth = ['api_key', 'merchant_session'] as const;
 
+  // Informations publiques (page d'inscription, documentation) : tarifs et limites en vigueur.
+  route(app, {
+    method: 'GET', url: '/public/info', tags: ['Système'], auth: 'public',
+    summary: 'Tarifs, limites et devises acceptées',
+    handler: async () => ({
+      api_base_url: config.PUBLIC_BASE_URL,
+      demo: config.NOWPAYMENTS_ENV === 'demo',
+      // En local, Mailpit affiche les e-mails envoyés
+      dev_mailbox_url: /(127\.0\.0\.1|localhost):1025/.test(config.SMTP_URL) ? 'http://localhost:8025' : null,
+      limits: {
+        unverified_receive_usd: config.LIMIT_UNVERIFIED_RECEIVE_USD,
+        personal_receive_usd_30d: config.LIMIT_PERSONAL_RECEIVE_USD_30D,
+        personal_withdraw_usd_24h: config.LIMIT_PERSONAL_WITHDRAW_USD_24H,
+      },
+      fees: {
+        payment_percent: config.PAYMENT_FEE_PERCENT,
+        withdrawal_percent: config.WITHDRAWAL_FEE_PERCENT,
+        withdrawal_fixed: config.WITHDRAWAL_FIXED_FEES,
+      },
+      price_currencies: supportedPriceCurrencies(config).map((c) => c.toUpperCase()),
+      checkout_currencies: config.CHECKOUT_CURRENCIES,
+    }),
+  });
+
   route(app, {
     method: 'GET', url: '/v1/balance', tags: ['Soldes'], auth: [...auth],
     summary: 'Soldes disponibles par crypto',
