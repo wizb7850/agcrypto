@@ -46,6 +46,7 @@ async function setup() {
       WITHDRAWAL_FIXED_FEES: { usdttrc20: '1' },
       CHECKOUT_CURRENCIES: ['usdttrc20', 'btc'],
       INVOICE_TTL_MINUTES: 60,
+      NOWPAYMENTS_ENV: 'sandbox',
     },
   });
   const key = generateApiKey();
@@ -82,6 +83,9 @@ describe('parcours complet', () => {
     const inv = res.json();
     expect(inv.checkout_url).toBe(`https://api.agcrypto.test/pay/${inv.id}`);
     expect((await createInvoice('cmd-1')).json().id).toBe(inv.id); // idempotent
+    const list = (await app.inject({ method: 'GET', url: '/v1/invoices', headers: auth })).json();
+    expect(list.invoices.map((i: { id: string }) => i.id)).toEqual([inv.id]);
+    expect((await app.inject({ method: 'GET', url: '/v1/me', headers: auth })).json().name).toBe('Boutique <Test>');
 
     // 2. Page de paiement
     const page = await app.inject({ method: 'GET', url: `/pay/${inv.id}` });
@@ -134,6 +138,7 @@ describe('parcours complet', () => {
     expect(wd2).toMatchObject({ amount: '49.5', fee: '5.95', net_amount: '43.55', status: 'requested' });
     const pending = (await app.inject({ method: 'GET', url: '/admin/withdrawals', headers: adm })).json();
     expect(pending.withdrawals.map((w: { id: string }) => w.id)).toEqual([wd2.id]);
+    expect(pending.withdrawals[0].merchant_name).toBe('Boutique <Test>');
     const done = await app.inject({ method: 'POST', url: `/admin/withdrawals/${wd2.id}/complete`, headers: adm,
       payload: { tx_hash: 'abcdef1234567890' } });
     expect(done.json().status).toBe('completed');

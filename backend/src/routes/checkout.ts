@@ -9,9 +9,13 @@ import { currencyInfo } from '../checkout/currencies.js';
 import { renderCheckoutPage } from '../checkout/page.js';
 import { HttpError } from '../services/errors.js';
 import { effectiveStatus, getCheckout, presentPayment, startPayment } from '../services/invoices.js';
+import { handleIpn } from '../services/ipn.js';
 import { fromUnits, toUnits } from '../lib/money.js';
 
-interface Deps { db: Db; nowpayments: NowPaymentsApi; publicBaseUrl: string; currencies: string[] }
+interface Deps {
+  db: Db; nowpayments: NowPaymentsApi; publicBaseUrl: string; currencies: string[];
+  demo: boolean; feePercent: number;
+}
 
 const idParam = z.object({ id: z.string().regex(/^inv_[0-9a-f]{24}$/) });
 
@@ -55,6 +59,7 @@ export function registerCheckoutRoutes(app: FastifyInstance, deps: Deps) {
       expires_at: invoice.expiresAt.toISOString(),
       success_url: invoice.successUrl,
       currencies: deps.currencies.map(currencyInfo),
+      demo: deps.demo,
       payment: payment ? await publicPayment(payment) : null,
     };
   });
@@ -64,4 +69,23 @@ export function registerCheckoutRoutes(app: FastifyInstance, deps: Deps) {
     const p = await startPayment(deps, parseId(req.params), pay_currency.toLowerCase());
     return publicPayment(p);
   });
+
+  if (deps.demo) {
+    // Mode démo uniquement : simule ce que NOWPayments enverrait quand le client paie.
+    app.post('/pay/:id/demo-simulate', async (req) => {
+      const { payment } = await getCheckout(deps.db, parseId(req.params));
+      if (!payment) throw new HttpError(409, 'no_payment', 'Choisis d\'abord une crypto');
+      const base = {
+        payment_id: payment.providerPaymentId, order_id: payment.invoiceId, pay_currency: payment.payCurrency,
+        pay_amount: payment.payAmount, actually_paid: payment.payAmount,
+        outcome_amount: payment.payAmount, outcome_currency: payment.payCurrency,
+      };
+      const opts = { feePercent: deps.feePercent, publicBaseUrl: deps.publicBaseUrl };
+      await handleIpn(deps.db, opts, { ...base, payment_status: 'confirming' });
+      setTimeout(() => {
+        handleIpn(deps.db, opts, { ...base, payment_status: 'finished' }).catch((e) => app.log.error(e));
+      }, 4000);
+      return { ok: true };
+    });
+  }
 }

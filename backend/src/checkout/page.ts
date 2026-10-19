@@ -162,7 +162,15 @@ export function renderCheckoutPage(invoiceId: string, nonce: string): string {
       el('div', { className: 'alert warn', textContent: '⚠️ Utilisez uniquement le réseau ' + p.network + '. Un envoi sur un autre réseau est perdu.' }),
       el('div', { className: 'status' }, el('span', { className: 'dot' }), 'En attente du paiement…'),
       change,
+      data.demo ? demoButton() : null,
     ].filter(Boolean));
+  }
+
+  function demoButton() {
+    const b = el('button', { type: 'button', className: 'opt', textContent: '🧪 Simuler le paiement (mode démo)' });
+    b.style.marginTop = '12px';
+    b.onclick = async () => { b.disabled = true; await fetch('/pay/' + ID + '/demo-simulate', { method: 'POST' }); load(); };
+    return b;
   }
 
   function startPolling() { if (!pollTimer) pollTimer = setInterval(load, 5000); }

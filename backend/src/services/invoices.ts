@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import type { Db } from '../db/client.js';
 import { invoices, merchants, payments } from '../db/schema.js';
 import { fromUnits, toUnits } from '../lib/money.js';
@@ -78,6 +78,13 @@ export async function createInvoice(db: Db, ttlMinutes: number, merchantId: stri
   const same = toUnits(existing.priceAmount) === toUnits(p.amount) && existing.priceCurrency === p.currency.toLowerCase();
   if (!same) throw new HttpError(409, 'order_id_conflict', `order_id déjà utilisé avec d'autres paramètres (${existing.id})`);
   return { invoice: existing, created: false };
+}
+
+export async function listInvoices(db: Db, baseUrl: string, merchantId: string) {
+  const rows = await db.select().from(invoices).where(eq(invoices.merchantId, merchantId))
+    .orderBy(desc(invoices.createdAt)).limit(100);
+  // Liste : une facture en attente est considérée comme ayant un paiement en cours (pas de requête par ligne).
+  return rows.map((inv) => presentInvoice(inv, baseUrl, true));
 }
 
 export async function getInvoice(db: Db, baseUrl: string, merchantId: string, id: string) {

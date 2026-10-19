@@ -1,94 +1,114 @@
 # agcrypto
 
-Passerelle de paiement crypto multi-marchands.
-**v1 :** les paiements sont encaissés sur le compte NOWPayments de la plateforme ;
-chaque marchand a un solde interne et demande des retraits, validés manuellement par l'admin.
+Passerelle de paiement crypto multi-marchands. Les paiements sont encaissés via NOWPayments sur le compte
+de la plateforme ; chaque marchand a un solde interne et demande des retraits, vérifiés et envoyés par l'équipe.
+
+```
+agcrypto/
+├── backend/    API (Fastify + PostgreSQL) : paiements, soldes, retraits, page de paiement
+├── frontend/   Interface (Next.js) : espace marchand + back-office
+└── docker-compose.yml   PostgreSQL pour le développement
+```
+
+## Lancer en local
+
+Prérequis : Node.js 22+ et Docker.
+
+```bash
+npm install          # installe backend + frontend
+npm run setup        # génère backend/.env (jeton admin inclus) — rien à remplir pour tester
+npm run db           # démarre PostgreSQL (port 55432) et crée les tables
+npm run merchant:create -- "Boutique test"   # affiche la clé API du marchand
+npm run dev          # backend sur :3000, frontend sur :3001
+```
+
+Ouvre **http://localhost:3001** :
+- **Espace marchand** : se connecter avec la clé `agc_...` affichée par `merchant:create`.
+- **Back-office** : se connecter avec `ADMIN_TOKEN` (dans `backend/.env`).
+
+Par défaut le projet tourne en **mode démo** (`NOWPAYMENTS_ENV=demo`) : adresses fictives et bouton
+« Simuler le paiement » sur la page de paiement, pour tester tout le parcours sans compte NOWPayments.
+
+### Passer sur NOWPayments
+
+Dans `backend/.env` :
+```
+NOWPAYMENTS_ENV=sandbox            # puis production
+NOWPAYMENTS_API_KEY=...            # dashboard NOWPayments
+NOWPAYMENTS_IPN_SECRET=...
+PUBLIC_BASE_URL=https://...        # adresse publique du backend (NOWPayments y envoie les notifications)
+```
+En local, exposer le backend avec `cloudflared tunnel --url http://localhost:3000` et mettre l'URL obtenue
+dans `PUBLIC_BASE_URL`.
+
+## Captures
+
+| Espace marchand | Back-office |
+|---|---|
+| ![](docs/espace-marchand.png) | ![](docs/back-office.png) |
+
+| Page de paiement : choix | Page de paiement : adresse |
+|---|---|
+| ![](docs/checkout-1.png) | ![](docs/checkout-2.png) |
 
 ## Fonctionnement
 
 ```
-Marchand ──POST /v1/invoices──► agcrypto ──► checkout_url = https://ton-domaine/pay/inv_...
-Client ouvre TA page /pay/... ──choisit sa crypto──► agcrypto ──(serveur à serveur)──► NOWPayments
-                                 ◄── adresse + montant + QR code affichés sur TA page
-Client paie ──► NOWPayments ──IPN signée──► agcrypto /ipn/nowpayments
-                                              ├─ crédite le solde du marchand (moins la commission)
-                                              └─ webhook signé ──► Marchand
-Marchand ──POST /v1/withdrawals──► solde bloqué ──► Admin envoie les fonds ──► /admin/.../complete
+Marchand ──crée une facture──► backend ──► lien vers TA page de paiement (/pay/...)
+Client choisit sa crypto ──► backend ──(serveur à serveur)──► NOWPayments ──► adresse + montant + QR
+Client paie ──► NOWPayments ──notification signée──► backend
+                                                     ├─ crédite le solde du marchand (− commission)
+                                                     └─ webhook signé ──► site du marchand
+Marchand demande un retrait ──► montant bloqué ──► ton équipe envoie le net ──► « J'ai envoyé les fonds »
 ```
 
-Le client ne voit jamais NOWPayments : la page de paiement est la tienne.
-
-| Choix de la crypto | Paiement |
-|---|---|
-| ![](docs/checkout-1.png) | ![](docs/checkout-2.png) |
-
-## Frais (tes revenus)
-
-Tout se règle dans `.env` :
+## Frais (dans `backend/.env`)
 
 | Variable | Défaut | Effet |
 |---|---|---|
-| `PAYMENT_FEE_PERCENT` | `1` | % retenu sur chaque paiement reçu |
+| `PAYMENT_FEE_PERCENT` | `1` | % retenu sur chaque paiement reçu (les frais NOWPayments sont déjà déduits par eux) |
 | `WITHDRAWAL_FEE_PERCENT` | `10` | % retenu sur chaque retrait |
-| `WITHDRAWAL_FIXED_FEES` | `{}` | Frais fixe par devise ajouté au retrait (couvre les frais réseau que tu paies à l'envoi), ex. `{"usdttrc20":"1"}` |
+| `WITHDRAWAL_FIXED_FEES` | `{"usdttrc20":"1",...}` | Frais fixe par crypto ajouté au retrait (frais réseau) |
 
-Exemple : client paie 49,99 €, NOWPayments te verse 50 USDT (après **leurs** frais, déjà déduits) →
-marchand crédité de 49,5 (−1 %). Il retire 49,5 → frais 4,95 (10 %) + 1 (fixe) = 5,95 → tu lui envoies **43,55**.
-Les frais sont figés au moment de la demande. `GET /admin/revenue` affiche tes gains par devise.
-
-Principes de conception :
-- **Registre comptable** (`ledger_entries`) : le solde = somme des écritures, jamais une valeur modifiée à la main. Un paiement ne peut pas être crédité deux fois (contrainte d'unicité).
-- **Montants en décimal exact** (`numeric` + `bigint`), jamais de float.
-- **IPN vérifiées** (HMAC-SHA512), idempotentes, et tolérantes au désordre (un statut ne recule jamais).
-- **Retraits** : le montant est bloqué dès la demande (verrou sur le marchand → pas de double dépense), recrédité si refus.
-- **Webhooks marchands** via outbox : écrits dans la même transaction que le changement d'état, relances jusqu'à 24 h.
-
-## Démarrage
-
-```bash
-cp .env.example .env          # renseigner les clés NOWPayments (sandbox d'abord)
-docker compose up -d          # PostgreSQL
-npm install
-npm run db:migrate
-npm run merchant:create -- "Ma boutique" https://boutique.com/webhooks/agcrypto
-npm run dev
-```
-
-Dans le dashboard NOWPayments : générer la clé API et le **secret IPN**. En local, exposer l'API avec un tunnel
-(`cloudflared tunnel --url http://localhost:3000`) et mettre l'URL dans `PUBLIC_BASE_URL`.
+Exemple : retrait de 30 USDT → 3 (10 %) + 1 (fixe) = 4 de frais → **26 envoyés** au marchand.
 
 ## API marchand (`Authorization: Bearer agc_...`)
 
 | Méthode | Route | Rôle |
 |---|---|---|
-| POST | `/v1/invoices` | Créer une facture `{amount:"49.99", currency:"EUR", order_id, description?, success_url?, cancel_url?}` → `checkout_url` (ta page de paiement) |
-| GET | `/v1/invoices/:id` | Statut : `pending`, `confirming`, `partially_paid`, `paid`, `failed`, `expired`, `refunded` |
-| GET | `/v1/balance` | Soldes disponibles par devise |
-| GET | `/v1/withdrawals/quote?currency=usdttrc20&amount=40` | Aperçu des frais et du montant net |
+| POST | `/v1/invoices` | Créer une facture `{amount, currency, order_id, description?, success_url?, cancel_url?}` → `checkout_url` |
+| GET | `/v1/invoices` · `/v1/invoices/:id` | Liste / détail des factures |
+| GET | `/v1/balance` | Soldes par crypto |
+| GET | `/v1/withdrawals/quote?currency=&amount=` | Aperçu des frais de retrait |
 | POST | `/v1/withdrawals` | Demander un retrait `{currency, amount, address, extra_id?}` |
 | GET | `/v1/withdrawals` | Historique des retraits |
 
-Webhooks : en-tête `x-agcrypto-signature: t=<timestamp>,v1=<hmac>` où
-`hmac = HMAC-SHA256(secret_webhook, "<timestamp>.<corps brut>")`. Le marchand doit vérifier la signature
-et rejeter un timestamp trop ancien (> 5 min).
+Webhooks : en-tête `x-agcrypto-signature: t=<timestamp>,v1=<hmac>` avec
+`hmac = HMAC-SHA256(secret_webhook, "<timestamp>.<corps brut>")`.
 
 ## Back-office (`Authorization: Bearer <ADMIN_TOKEN>`)
 
 | Méthode | Route | Rôle |
 |---|---|---|
-| GET | `/admin/withdrawals?status=requested` | Retraits à traiter (envoyer `net_amount`, pas `amount`) |
-| POST | `/admin/withdrawals/:id/complete` | Après envoi des fonds : `{tx_hash}` |
-| GET | `/admin/revenue` | Tes gains : frais sur paiements + frais sur retraits |
+| GET | `/admin/withdrawals?status=requested\|completed\|rejected` | Retraits |
+| POST | `/admin/withdrawals/:id/complete` | Après envoi : `{tx_hash}` |
 | POST | `/admin/withdrawals/:id/reject` | Refuser et recréditer : `{reason}` |
+| GET | `/admin/revenue` | Revenus par crypto |
+
+## Sécurité et fiabilité
+
+- Registre comptable : un paiement ne peut pas être crédité deux fois ; solde = somme des écritures.
+- Montants en décimal exact (jamais de float).
+- Notifications NOWPayments vérifiées (HMAC-SHA512) ; statuts qui ne reculent jamais.
+- Retraits : montant bloqué dès la demande, deux demandes simultanées ne peuvent pas dépenser le même solde.
+- Webhooks marchands avec relances jusqu'à 24 h.
 
 ## Tests
 
-`npm test` : tests unitaires + parcours complet sur un vrai PostgreSQL en mémoire (PGlite), sans Docker.
+`npm test` : tests unitaires + parcours complet sur un vrai PostgreSQL en mémoire.
 
 ## Prochaines étapes
 
-1. Dashboard marchand (inscription, clés API, soldes, retraits).
-2. Retraits automatiques via l'API Payouts de NOWPayments (+ validation d'adresse).
-3. KYC des marchands, limites de retrait, double validation admin, journal d'audit.
-4. Rate limiting, chiffrement des secrets (KMS), alerte de rapprochement (solde NOWPayments ≥ somme des soldes marchands).
-5. Plus tard : connexion directe aux blockchains (même API marchand, nouveau fournisseur).
+1. Inscription des marchands par email / mot de passe (aujourd'hui : clé API créée par l'admin).
+2. Comptes nominatifs pour l'équipe back-office et journal d'audit des actions.
+3. Gestion des marchands depuis le back-office (création, suspension).

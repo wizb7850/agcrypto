@@ -1,37 +1,18 @@
 {
   "name": "agcrypto",
-  "version": "0.1.0",
   "private": true,
-  "description": "Passerelle de paiement crypto multi-marchands (v1 : encaissement via NOWPayments)",
-  "type": "module",
-  "engines": {
-    "node": ">=22"
-  },
+  "description": "Passerelle de paiement crypto : backend (API) + frontend (tableaux de bord)",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
-    "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/server.js",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx src/db/migrate.ts",
-    "merchant:create": "tsx src/cli/create-merchant.ts"
-  },
-  "dependencies": {
-    "drizzle-orm": "^0.45.4",
-    "fastify": "^5.12.7",
-    "pg": "^8.23.1",
-    "qrcode": "^1.5.4",
-    "zod": "^4.6.7"
+    "postinstall": "npm --prefix backend install && npm --prefix frontend install",
+    "setup": "npm --prefix backend run setup",
+    "db": "docker compose up -d --wait && npm --prefix backend run db:migrate",
+    "dev": "concurrently -n api,web -c blue,magenta \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
+    "merchant:create": "npm --prefix backend run merchant:create --",
+    "test": "npm --prefix backend test",
+    "typecheck": "npm --prefix backend run typecheck && npm --prefix frontend run typecheck",
+    "build": "npm --prefix backend run build && npm --prefix frontend run build"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.10",
-    "@types/node": "^22.20.5",
-    "@types/pg": "^8.23.1",
-    "@types/qrcode": "^1.5.6",
-    "drizzle-kit": "^0.31.11",
-    "tsx": "^4.23.15",
-    "typescript": "^5.9.3",
-    "vitest": "^3.2.7"
+    "concurrently": "^9.2.5"
   }
 }

@@ -1,14 +1,20 @@
 import { buildApp } from './app.js';
 import { loadConfig, loadDotEnv } from './config.js';
 import { createDb } from './db/client.js';
+import { createDemoProvider } from './providers/demo.js';
 import { createNowPaymentsClient } from './providers/nowpayments.js';
 import { deliverDueWebhooks } from './services/webhooks.js';
 
 loadDotEnv();
 const config = loadConfig();
 const { db, close } = createDb(config.DATABASE_URL);
-const nowpayments = createNowPaymentsClient({ apiKey: config.NOWPAYMENTS_API_KEY, env: config.NOWPAYMENTS_ENV });
+const nowpayments = config.NOWPAYMENTS_ENV === 'demo'
+  ? createDemoProvider()
+  : createNowPaymentsClient({ apiKey: config.NOWPAYMENTS_API_KEY, env: config.NOWPAYMENTS_ENV });
 const app = buildApp({ db, config, nowpayments });
+if (config.NOWPAYMENTS_ENV === 'demo') {
+  app.log.warn('MODE DÉMO : paiements fictifs, ne jamais utiliser en production (NOWPAYMENTS_ENV=demo)');
+}
 
 // Worker d'envoi des webhooks (dans le même processus pour la v1).
 let stopping = false;
@@ -35,3 +41,4 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 }
 
 await app.listen({ port: config.PORT, host: config.HOST });
+app.log.info(`API prête : ${config.PUBLIC_BASE_URL}/health`);

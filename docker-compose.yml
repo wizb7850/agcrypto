@@ -5,7 +5,12 @@ services:
       POSTGRES_USER: agcrypto
       POSTGRES_PASSWORD: agcrypto
       POSTGRES_DB: agcrypto
-    ports: ["5433:5432"]  # 5433 pour ne pas entrer en conflit avec un PostgreSQL déjà installé
+    # Port peu courant pour ne pas entrer en conflit avec un PostgreSQL déjà installé
+    ports: ["${POSTGRES_PORT:-55432}:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agcrypto"]
+      interval: 2s
+      retries: 30
 volumes:
   pgdata:

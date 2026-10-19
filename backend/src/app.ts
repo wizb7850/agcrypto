@@ -3,11 +3,11 @@ import Fastify, { type FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Config } from './config.js';
 import type { Db } from './db/client.js';
-import { apiKeys } from './db/schema.js';
+import { apiKeys, merchants } from './db/schema.js';
 import { safeEqual, sha256 } from './lib/security.js';
 import { type NowPaymentsApi, verifyIpnSignature } from './providers/nowpayments.js';
 import { HttpError } from './services/errors.js';
-import { createInvoice, getInvoice, presentInvoice } from './services/invoices.js';
+import { createInvoice, getInvoice, listInvoices, presentInvoice } from './services/invoices.js';
 import { handleIpn } from './services/ipn.js';
 import { getBalances, getRevenue } from './services/ledger.js';
 import {
@@ -19,7 +19,8 @@ export interface AppDeps {
   db: Db;
   config: Pick<Config,
     | 'PUBLIC_BASE_URL' | 'NOWPAYMENTS_IPN_SECRET' | 'ADMIN_TOKEN' | 'LOG_LEVEL' | 'PAYMENT_FEE_PERCENT'
-    | 'WITHDRAWAL_FEE_PERCENT' | 'WITHDRAWAL_FIXED_FEES' | 'CHECKOUT_CURRENCIES' | 'INVOICE_TTL_MINUTES'>;
+    | 'WITHDRAWAL_FEE_PERCENT' | 'WITHDRAWAL_FIXED_FEES' | 'CHECKOUT_CURRENCIES' | 'INVOICE_TTL_MINUTES'
+    | 'NOWPAYMENTS_ENV'>;
   nowpayments: NowPaymentsApi;
 }
 
@@ -93,6 +94,17 @@ export function buildApp({ db, config, nowpayments }: AppDeps) {
     return reply.status(created ? 201 : 200).send(presentInvoice(invoice, config.PUBLIC_BASE_URL, false));
   });
 
+  app.get('/v1/invoices', async (req) => ({
+    invoices: await listInvoices(db, config.PUBLIC_BASE_URL, await merchantAuth(req)),
+  }));
+
+  // Nom du marchand connecté (pour l'affichage du tableau de bord)
+  app.get('/v1/me', async (req) => {
+    const id = await merchantAuth(req);
+    const [m] = await db.select({ id: merchants.id, name: merchants.name }).from(merchants).where(eq(merchants.id, id));
+    return m;
+  });
+
   app.get<{ Params: { id: string } }>('/v1/invoices/:id', async (req) => {
     return getInvoice(db, config.PUBLIC_BASE_URL, await merchantAuth(req), req.params.id);
   });
@@ -121,6 +133,8 @@ export function buildApp({ db, config, nowpayments }: AppDeps) {
 
   // ---- Notifications NOWPayments ----
   app.post('/ipn/nowpayments', async (req, reply) => {
+    // En démo il n'y a pas de secret IPN : la route est fermée pour qu'on ne puisse rien forger.
+    if (config.NOWPAYMENTS_ENV === 'demo') throw new HttpError(404, 'not_found', 'IPN désactivées en mode démo');
     const sig = req.headers['x-nowpayments-sig'];
     if (!verifyIpnSignature(req.body, typeof sig === 'string' ? sig : undefined, config.NOWPAYMENTS_IPN_SECRET)) {
       req.log.warn('IPN rejetée : signature invalide');
@@ -134,6 +148,7 @@ export function buildApp({ db, config, nowpayments }: AppDeps) {
   // ---- Page de paiement publique ----
   registerCheckoutRoutes(app, {
     db, nowpayments, publicBaseUrl: config.PUBLIC_BASE_URL, currencies: config.CHECKOUT_CURRENCIES,
+    demo: config.NOWPAYMENTS_ENV === 'demo', feePercent: config.PAYMENT_FEE_PERCENT,
   });
 
   // ---- Back-office (toi) ----

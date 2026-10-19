@@ -10,9 +10,11 @@ import { enqueueEvent } from './webhooks.js';
 
 type Withdrawal = typeof withdrawals.$inferSelect;
 
-export function presentWithdrawal(w: Withdrawal) {
+export function presentWithdrawal(w: Withdrawal, merchantName?: string) {
   return {
     id: w.id,
+    merchant_id: w.merchantId,
+    ...(merchantName !== undefined && { merchant_name: merchantName }),
     status: w.status,
     currency: w.currency,
     amount: fromUnits(toUnits(w.amount)),
@@ -69,9 +71,10 @@ export async function listWithdrawals(db: Db, filter: { merchantId?: string; sta
     filter.merchantId ? eq(withdrawals.merchantId, filter.merchantId) : undefined,
     filter.status ? eq(withdrawals.status, filter.status) : undefined,
   ];
-  const rows = await db.select().from(withdrawals).where(and(...conds))
-    .orderBy(desc(withdrawals.createdAt)).limit(100);
-  return rows.map(presentWithdrawal);
+  const rows = await db.select({ w: withdrawals, merchantName: merchants.name }).from(withdrawals)
+    .innerJoin(merchants, eq(merchants.id, withdrawals.merchantId))
+    .where(and(...conds)).orderBy(desc(withdrawals.createdAt)).limit(100);
+  return rows.map((r) => presentWithdrawal(r.w, filter.merchantId ? undefined : r.merchantName));
 }
 
 export async function completeWithdrawal(db: Db, id: string, txHash: string) {
