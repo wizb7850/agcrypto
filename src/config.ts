@@ -45,3 +45,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   }
   return parsed.data;
 }
+
+/** Pour les scripts (migrations, création de marchand) qui n'ont besoin que de la base. */
+export function requireDatabaseUrl(): string {
+  loadDotEnv();
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    throw new Error(existsSync('.env')
+      ? 'DATABASE_URL manquant dans le fichier .env.'
+      : 'Fichier .env introuvable : crée-le avec « cp .env.example .env » puis remplis-le.');
+  }
+  return url;
+}

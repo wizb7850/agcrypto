@@ -1,11 +1,10 @@
 // Usage : npm run merchant:create -- "Nom de la boutique" [https://boutique.com/webhooks/agcrypto]
 import { randomBytes } from 'node:crypto';
-import { loadDotEnv } from '../config.js';
+import { requireDatabaseUrl } from '../config.js';
 import { createDb } from '../db/client.js';
 import { apiKeys, merchants } from '../db/schema.js';
 import { generateApiKey, newId } from '../lib/security.js';
 
-loadDotEnv();
 const [name, webhookUrl] = process.argv.slice(2);
 if (!name) {
   console.error('Usage : npm run merchant:create -- "Nom" [webhook_url]');
@@ -16,7 +15,7 @@ if (webhookUrl && !webhookUrl.startsWith('https://')) {
   process.exit(1);
 }
 
-const { db, close } = createDb(process.env.DATABASE_URL!);
+const { db, close } = createDb(requireDatabaseUrl());
 const merchantId = newId('mch');
 const webhookSecret = `whsec_${randomBytes(24).toString('base64url')}`;
 const apiKey = generateApiKey();
