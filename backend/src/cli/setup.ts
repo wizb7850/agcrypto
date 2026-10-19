@@ -20,6 +20,8 @@ const out = template.split('\n').map((line) => {
   const [, key, def] = m as unknown as [string, string, string];
   let value = values.get(key) ?? '';
   if (key === 'DATABASE_URL' && OLD_DB_DEFAULTS.includes(value)) value = '';
+  // Un jeton admin trop court serait refusé au démarrage : on en génère un nouveau.
+  if (key === 'ADMIN_TOKEN' && value.length < 32) value = '';
   if (!value) {
     value = key === 'ADMIN_TOKEN' ? randomBytes(32).toString('hex') : def;
     if (value) changes.push(key);
