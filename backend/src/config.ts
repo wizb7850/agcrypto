@@ -9,7 +9,8 @@ export function loadDotEnv(path = '.env') {
 const schema = z.object({
   DATABASE_URL: z.string().min(1).default('postgres://agcrypto:agcrypto@localhost:55432/agcrypto'),
   PORT: z.coerce.number().int().default(3000),
-  HOST: z.string().default('0.0.0.0'),
+  // 127.0.0.1 = joignable uniquement depuis cette machine. Mettre 0.0.0.0 seulement en production derrière un proxy.
+  HOST: z.string().default('127.0.0.1'),
   PUBLIC_BASE_URL: z.url().default('http://localhost:3000'),
   // demo : aucun appel à NOWPayments, adresses fictives et bouton « simuler le paiement » (local uniquement)
   NOWPAYMENTS_ENV: z.enum(['demo', 'sandbox', 'production']).default('demo'),
